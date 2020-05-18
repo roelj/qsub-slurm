@@ -1,0 +1,190 @@
+#!@GUILE@ --no-auto-compile
+-*- scheme -*-
+!#
+;;; Copyright © 2020  Roel Janssen <roel@gnu.org>
+
+;;; This program is free software: you can redistribute it and/or
+;;; modify it under the terms of the GNU General Public License as
+;;; published by the Free Software Foundation, either version 3 of
+;;; the License, or (at your option) any later version.
+
+(use-modules (ice-9 format)
+             (ice-9 getopt-long)
+             (ice-9 popen)
+             (ice-9 rdelim)
+             (srfi srfi-1))
+
+;;
+;; Program options
+;; ----------------------------------------------------------------------------
+
+(define* (parse-options options #:optional (config '()))
+  (format #t "(parse-options ~s ...)~%" options)
+  (if (null? options)
+      config
+      (let ((option   (car options))
+            (argument (if (> (length options) 1)
+                          (cadr options)
+                          "")))
+        (cond
+         ((string= "-l" option)
+          (cond
+           ;; Runtime property
+           ;; -----------------------------------------------------------------
+           ((string-prefix? "h_rt=" argument)
+            (parse-options (cddr options)
+                           (cons `(time . ,(substring argument 5))
+                                 config)))
+           ;; Memory property
+           ;; -----------------------------------------------------------------
+           ((string-prefix? "h_vmem=" argument)
+            (parse-options (cddr options)
+                           (cons `(memory . ,(substring argument 7))
+                                 config)))))
+
+         ;; Threads
+         ;; -------------------------------------------------------------------
+         ((and (string= "-pe" option)
+               (string= "threaded" argument)
+               (> (length options) 2))
+          (parse-options (cdddr options)
+                         (cons `(threads . ,(caddr options))
+                               config)))
+
+         ;; Preserve environment option.
+         ;; -------------------------------------------------------------------
+         ((string= "-V" option)
+          (parse-options (cdr options)
+                         (cons `(preserve-environment . #t) config)))
+
+         ;; Job name.
+         ;; -------------------------------------------------------------------
+         ((string= "-N" option)
+          (parse-options (cddr options)
+                         (cons `(name . ,argument) config)))
+
+         ;; E-mail options
+         ;; -------------------------------------------------------------------
+         ((string= "-m" option)
+          (parse-options (cddr options)
+                         (cons `(mail-events . ,argument) config)))
+
+         ((string= "-M" option)
+          (parse-options (cddr options)
+                         (cons `(mail-address . ,argument) config)))
+
+         ;; Logging options
+         ;; -------------------------------------------------------------------
+         ((string= "-e" option)
+          (parse-options (cddr options)
+                         (cons `(error-stream . ,argument) config)))
+
+         ((string= "-o" option)
+          (parse-options (cddr options)
+                         (cons `(output-stream . ,argument) config)))
+
+         ;; Job dependencies
+         ;; -------------------------------------------------------------------
+         ((string= "-hold_jid" option)
+          (parse-options (cddr options)
+                         (cons `(dependency . ,argument) config)))
+
+         ;; Unhandled options
+         ;; -------------------------------------------------------------------
+         ((string-prefix? "-" option)
+          (format (current-error-port)
+                  "Ignoring unhandled option: ~s.~%" option))
+
+         (else
+          (parse-options (cdr options)
+                         (cons `(script . ,option) config)))))))
+
+(define %config (parse-options (cdr (command-line))))
+(define %username (getlogin))
+
+(unless (string? %username)
+  (format #t "Could not obtain your username.~%")
+  (exit 0))
+
+;;
+;; Jobs and job names translation
+;; ----------------------------------------------------------------------------
+
+(define (jobs-and-their-names)
+
+  (define* (read-job-entries port #:optional (out '()))
+    (let ((line (read-line port)))
+      (if (eof-object? line)
+          out
+          (let ((fields (string-split line #\space)))
+            (read-job-entries port
+                              (cons `(,(cadr fields) . (car fields))
+                                    out))))))
+
+  (let ((port (open-input-pipe
+               (string-append
+                "@SQUEUE@"
+                " -u " %username
+                " -t PENDING,RUNNING"
+                " --format='%i %j'"
+                " -h"))))
+    (close-pipe port)
+    (read-job-entries port)))
+
+;;
+;; Command-line options processing
+;; ----------------------------------------------------------------------------
+
+(define (construct-slurm-command options)
+  (call-with-values (lambda _
+                      (partition (lambda (item)
+                                   (eq? (car item) 'dependency))
+                                 options))
+    (lambda (dependencies other)
+      (let ((jobs (jobs-and-their-names)))
+        (call-with-output-string
+          (lambda (port)
+            (format port "sbatch --chdir=$HOME")
+
+            (when (assoc-ref other 'time)
+              (format port "--time ~a " (assoc-ref other 'time)))
+
+            (when (assoc-ref other 'memory)
+              (format port "--memory ~a " (assoc-ref other 'memory)))
+
+            (when (assoc-ref other 'name)
+              (format port "--job-name ~s " (assoc-ref other 'name)))
+
+            (format port "--export=~a "
+                    (if (assoc-ref other 'preserve-environment)
+                        "ALL" "NONE"))
+
+            ;; We divide the number of threads by two, because
+            ;; every CPU in the cluster can have two threads.
+            (when (assoc-ref other 'threads)
+              (format port "--cpus-per-task ~a "
+                      (ceiling
+                       (/ (string->number (assoc-ref other 'threads))
+                          2))))
+
+            (unless (null? dependencies)
+              (format port "--dependency=afterok:~{~a~}"
+                      (map (lambda (dependency)
+                             (assoc-ref jobs dependency)
+                             dependencies))))))))))
+
+;;
+;; Slurmification
+;; ----------------------------------------------------------------------------
+
+(format #t "Command:~%  ~a~%" (construct-slurm-command %config))
+
+;; (system (string-append
+;;          "@SBATCH@"
+;;          " --time 00:00:90"
+;;          " --mem 10M"
+;;          " --job-name \"TEST-A-VERY-LONG-NAME-asdfkjhkjsdhfkjhsdkfjhsdkfjhsdkjfhsjkdhf\""
+;;          " --cpus-per-task=1"
+;;          " --dependency=afterok:1100602"
+;;          " --chdir=$HOME"
+;;          " job-test.sh"))
