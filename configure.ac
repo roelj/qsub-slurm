@@ -15,6 +15,8 @@ dnl along with this program. If not, see <http://www.gnu.org/licenses/>.
 dnl -*- Autoconf -*-
 
 AC_INIT([qsub-slurm], [0.0.1], [roel@gnu.org])
+AM_INIT_AUTOMAKE([foreign])
+
 GUILE_PKG([3.0 2.2 2.0])
 GUILE_PROGS
 
