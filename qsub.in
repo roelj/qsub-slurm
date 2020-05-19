@@ -19,7 +19,6 @@
 ;; ----------------------------------------------------------------------------
 
 (define* (parse-options options #:optional (config '()))
-  (format #t "(parse-options ~s ...)~%" options)
   (if (null? options)
       config
       (let ((option   (car options))
@@ -118,18 +117,19 @@
           out
           (let ((fields (string-split line #\space)))
             (read-job-entries port
-                              (cons `(,(cadr fields) . (car fields))
+                              (cons `(,(cadr fields) . ,(car fields))
                                     out))))))
 
-  (let ((port (open-input-pipe
-               (string-append
-                "@SQUEUE@"
-                " -u " %username
-                " -t PENDING,RUNNING"
-                " --format='%i %j'"
-                " -h"))))
+  (let* ((port (open-input-pipe
+                (string-append
+                 "@SQUEUE@"
+                 " -u " %username
+                 " -t PENDING,RUNNING"
+                 " --format='%i %j'"
+                 " -h")))
+         (entries (read-job-entries port)))
     (close-pipe port)
-    (read-job-entries port)))
+    entries))
 
 ;;
 ;; Command-line options processing
@@ -144,16 +144,23 @@
       (let ((jobs (jobs-and-their-names)))
         (call-with-output-string
           (lambda (port)
-            (format port "sbatch --chdir=$HOME")
+            (format port "@SBATCH@ --chdir=$HOME ")
 
             (when (assoc-ref other 'time)
               (format port "--time ~a " (assoc-ref other 'time)))
 
             (when (assoc-ref other 'memory)
-              (format port "--memory ~a " (assoc-ref other 'memory)))
+              (format port "--mem ~a " (assoc-ref other 'memory)))
 
             (when (assoc-ref other 'name)
               (format port "--job-name ~s " (assoc-ref other 'name)))
+
+            ;; TOOD: Translate the e-mail options.
+            ;(when (assoc-ref other 'mail-events)
+            ;  (format port " --mail-type=~a" (assoc-ref other 'mail-events)))
+
+            ;(when (assoc-ref other 'mail-address)
+            ;  (format port " --mail-user=~a" (assoc-ref other 'mail-address)))
 
             (format port "--export=~a "
                     (if (assoc-ref other 'preserve-environment)
@@ -167,24 +174,18 @@
                        (/ (string->number (assoc-ref other 'threads))
                           2))))
 
-            (unless (null? dependencies)
-              (format port "--dependency=afterok:~{~a~}"
-                      (map (lambda (dependency)
-                             (assoc-ref jobs dependency)
-                             dependencies))))))))))
+            (unless (or (null? dependencies)
+                        (null? jobs))
+              (format port "--dependency=afterok~{:~a~} "
+                      (map (lambda (dependency) (assoc-ref jobs dependency))
+                           (map cdr dependencies))))
+
+            (format port "~a" (assoc-ref other 'script))))))))
 
 ;;
 ;; Slurmification
 ;; ----------------------------------------------------------------------------
 
-(format #t "Command:~%  ~a~%" (construct-slurm-command %config))
-
-;; (system (string-append
-;;          "@SBATCH@"
-;;          " --time 00:00:90"
-;;          " --mem 10M"
-;;          " --job-name \"TEST-A-VERY-LONG-NAME-asdfkjhkjsdhfkjhsdkfjhsdkfjhsdkjfhsjkdhf\""
-;;          " --cpus-per-task=1"
-;;          " --dependency=afterok:1100602"
-;;          " --chdir=$HOME"
-;;          " job-test.sh"))
+(let ((command (construct-slurm-command %config)))
+  (format #t "Running: ~a~%" (construct-slurm-command %config))
+  (system command))
