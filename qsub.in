@@ -9,7 +9,6 @@
 ;;; the License, or (at your option) any later version.
 
 (use-modules (ice-9 format)
-             (ice-9 getopt-long)
              (ice-9 popen)
              (ice-9 rdelim)
              (srfi srfi-1))
@@ -82,17 +81,47 @@
           (parse-options (cddr options)
                          (cons `(output-stream . ,argument) config)))
 
+         ;; Administrative options
+         ;; -------------------------------------------------------------------
+         ((string= "-P" option)
+          (format #t "Ignoring option ~s.~%" "-P")
+          (parse-options (cddr options)
+                         (cons `(project . ,argument) config)))
+
+         ((string= "-q" option)
+          (format #t "Ignoring option '~s.~%" "-q")
+          (parse-options (cddr options)
+                         (cons `(queue . ,argument) config)))
+
+         ((string= "-R" option)
+          (format #t "Ignoring option ~s.~%" "-R")
+          (parse-options (cddr options)
+                         (cons `(reservation . ,argument) config)))
+
+         ;; Additional options
+         ((string= "-@" option)
+          (let* ((additional-options (call-with-input-file argument read-line))
+                 (split-opts (string-split additional-options #\space)))
+            (parse-options (append split-opts (cddr options))
+                           (cons `(configfile . ,argument) config))))
+
          ;; Job dependencies
          ;; -------------------------------------------------------------------
          ((string= "-hold_jid" option)
-          (parse-options (cddr options)
-                         (cons `(dependency . ,argument) config)))
+          (let ((jids (string-split argument #\,)))
+            (parse-options (cddr options)
+              (append (map (lambda (jid)
+                             `(dependency . ,jid))
+                           jids)
+                      config))))
 
          ;; Unhandled options
          ;; -------------------------------------------------------------------
          ((string-prefix? "-" option)
           (format (current-error-port)
-                  "Ignoring unhandled option: ~s.~%" option))
+                  "Ignoring unhandled option ~s and skipping one argument.~%"
+                  option)
+          (parse-options (cddr options) config))
 
          (else
           (parse-options (cdr options)
@@ -187,5 +216,5 @@
 ;; ----------------------------------------------------------------------------
 
 (let ((command (construct-slurm-command %config)))
-  (format #t "Running: ~a~%" (construct-slurm-command %config))
+  (format #t "Running:  ~s~%" command)
   (system command))
