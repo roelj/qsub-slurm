@@ -195,6 +195,13 @@
                     (if (assoc-ref other 'preserve-environment)
                         "ALL" "NONE"))
 
+            ;; Output streams / log files
+            (when (assoc-ref other 'output-stream)
+              (format port "--output ~s " (assoc-ref other 'output-stream)))
+
+            (when (assoc-ref other 'error-stream)
+              (format port "--error ~s " (assoc-ref other 'error-stream)))
+
             ;; We divide the number of threads by two, because
             ;; every CPU in the cluster can have two threads.
             (when (assoc-ref other 'threads)
