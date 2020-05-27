@@ -217,4 +217,7 @@
 
 (let ((command (construct-slurm-command %config)))
   (format #t "Running:  ~s~%" command)
+  (for-each (lambda (entry) (setenv (car entry) (cdr entry)))
+            `(("SGE_STDERR_PATH" . ,(assoc-ref %config 'error-stream))
+              ("SGE_STDOUT_PATH" . ,(assoc-ref %config 'output-stream))))
   (system command))
