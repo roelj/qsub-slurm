@@ -131,8 +131,10 @@
 (define %username (getlogin))
 
 (unless (string? %username)
-  (format #t "Could not obtain your username.~%")
-  (exit 0))
+  (set! %username (getenv "LOGNAME"))
+  (unless (string? %username)
+    (format #t "Could not obtain your username.~%")
+    (exit 0)))
 
 ;;
 ;; Jobs and job names translation
