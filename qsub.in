@@ -13,6 +13,13 @@
              (ice-9 rdelim)
              (srfi srfi-1))
 
+(define (flatten lst)
+  (cond [(null? lst)
+         '()]
+        [(pair? lst)
+         (append (flatten (car lst)) (flatten (cdr lst)))]
+        [else (list lst)]))
+
 ;;
 ;; Program options
 ;; ----------------------------------------------------------------------------
@@ -26,19 +33,26 @@
                           "")))
         (cond
          ((string= "-l" option)
-          (cond
-           ;; Runtime property
-           ;; -----------------------------------------------------------------
-           ((string-prefix? "h_rt=" argument)
-            (parse-options (cddr options)
-                           (cons `(time . ,(substring argument 5))
-                                 config)))
-           ;; Memory property
-           ;; -----------------------------------------------------------------
-           ((string-prefix? "h_vmem=" argument)
-            (parse-options (cddr options)
-                           (cons `(memory . ,(substring argument 7))
-                                 config)))))
+          (if (string-contains argument ",")
+              (let ((rt-specs (string-split argument #\,)))
+                (parse-options
+                 (flatten
+                  (append (map (lambda (arg) (list "-l" arg)) rt-specs)
+                          (cddr options)))
+                 config))
+              (cond
+               ;; Runtime property
+               ;; -------------------------------------------------------------
+               ((string-prefix? "h_rt=" argument)
+                (parse-options (cddr options)
+                               (cons `(time . ,(substring argument 5))
+                                     config)))
+               ;; Memory property
+               ;; -------------------------------------------------------------
+               ((string-prefix? "h_vmem=" argument)
+                (parse-options (cddr options)
+                               (cons `(memory . ,(substring argument 7))
+                                     config))))))
 
          ;; Threads
          ;; -------------------------------------------------------------------
