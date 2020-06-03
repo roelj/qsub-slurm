@@ -151,6 +151,33 @@
     (exit 0)))
 
 ;;
+;; Fixing some non-trivial incompatibility.
+;; ----------------------------------------------------------------------------
+;;
+;; Specifying directories instead of files to log to is handled by SGE by
+;; making up a filename.  SLURM does not do such a thing, but seems to ignore
+;; the logging.  Here we attempt mitigate that incompatibility by making up
+;; a filename.
+
+(when (and (assoc-ref %config 'error-stream)
+           (assoc-ref %config 'script))
+  (let ((file (stat (assoc-ref %config 'error-stream) #f)))
+    (when (and file (eq? (stat:type file) 'directory))
+      (assoc-set! %config 'error-stream
+                  (string-append
+                   (assoc-ref %config 'error-stream)
+                   "/" (assoc-ref %config 'script) ".err")))))
+
+(when (and (assoc-ref %config 'output-stream)
+           (assoc-ref %config 'script))
+  (let ((file (stat (assoc-ref %config 'output-stream) #f)))
+    (when (and file (eq? (stat:type file) 'directory))
+      (assoc-set! %config 'output-stream
+                  (string-append
+                   (assoc-ref %config 'output-stream)
+                   "/" (assoc-ref %config 'script) ".out")))))
+
+;;
 ;; Jobs and job names translation
 ;; ----------------------------------------------------------------------------
 

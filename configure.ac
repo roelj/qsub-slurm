@@ -14,7 +14,7 @@ dnl You should have received a copy of the GNU General Public License
 dnl along with this program. If not, see <http://www.gnu.org/licenses/>.
 dnl -*- Autoconf -*-
 
-AC_INIT([qsub-slurm], [0.0.4], [roel@gnu.org])
+AC_INIT([qsub-slurm], [0.0.5], [roel@gnu.org])
 AM_INIT_AUTOMAKE([foreign])
 
 GUILE_PKG([3.0 2.2 2.0])
