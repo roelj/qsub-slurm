@@ -166,7 +166,7 @@
       (assoc-set! %config 'error-stream
                   (string-append
                    (assoc-ref %config 'error-stream)
-                   "/" (assoc-ref %config 'script) ".err")))))
+                   "/" (basename (assoc-ref %config 'script)) ".err")))))
 
 (when (and (assoc-ref %config 'output-stream)
            (assoc-ref %config 'script))
@@ -175,7 +175,7 @@
       (assoc-set! %config 'output-stream
                   (string-append
                    (assoc-ref %config 'output-stream)
-                   "/" (assoc-ref %config 'script) ".out")))))
+                   "/" (basename (assoc-ref %config 'script)) ".out")))))
 
 ;;
 ;; Jobs and job names translation
