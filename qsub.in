@@ -11,6 +11,7 @@
 (use-modules (ice-9 format)
              (ice-9 popen)
              (ice-9 rdelim)
+             (ice-9 textual-ports)
              (srfi srfi-1))
 
 (define (flatten lst)
@@ -68,6 +69,10 @@
          ((string= "-V" option)
           (parse-options (cdr options)
                          (cons `(preserve-environment . #t) config)))
+
+         ((string= "-cwd" option)
+          (parse-options (cdr options)
+                         (cons `(preserve-cwd . #t) config)))
 
          ;; Job name.
          ;; -------------------------------------------------------------------
@@ -177,6 +182,21 @@
                    (assoc-ref %config 'output-stream)
                    "/" (basename (assoc-ref %config 'script)) ".out")))))
 
+
+;;
+;; Wrap command from stdin
+;; ----------------------------------------------------------------------------
+(define (read-job-script-from-stdin)
+  "Creates a job script from the data passed to stdin."
+  (let* ((job-port     (mkstemp! "/tmp/qsub-slurm-XXXXXX"))
+         (job-filename (port-filename job-port)))
+    (format job-port "#!/bin/sh~%~a~%" (get-string-all (current-input-port)))
+    (close-port job-port)
+    job-filename))
+
+(unless (assoc-ref %config 'script)
+  (set! %config (cons `(stdin-script . ,(read-job-script-from-stdin)) %config)))
+
 ;;
 ;; Jobs and job names translation
 ;; ----------------------------------------------------------------------------
@@ -203,6 +223,7 @@
     (close-pipe port)
     entries))
 
+
 ;;
 ;; Command-line options processing
 ;; ----------------------------------------------------------------------------
@@ -216,7 +237,10 @@
       (let ((jobs (jobs-and-their-names)))
         (call-with-output-string
           (lambda (port)
-            (format port "@SBATCH@ --chdir=$HOME ")
+            (format port "@SBATCH@ ")
+
+            (unless (assoc-ref other 'preserve-cwd)
+              (format port "--chdir=$HOME "))
 
             (when (assoc-ref other 'time)
               (format port "--time ~a " (assoc-ref other 'time)))
@@ -259,7 +283,9 @@
                       (map (lambda (dependency) (assoc-ref jobs dependency))
                            (map cdr dependencies))))
 
-            (format port "~a" (assoc-ref other 'script))))))))
+            (if (assoc-ref other 'script)
+                (format port "~a" (assoc-ref other 'script))
+                (format port "~a" (assoc-ref other 'stdin-script)))))))))
 
 ;;
 ;; Slurmification
@@ -270,4 +296,7 @@
   (for-each (lambda (entry) (setenv (car entry) (cdr entry)))
             `(("SGE_STDERR_PATH" . ,(assoc-ref %config 'error-stream))
               ("SGE_STDOUT_PATH" . ,(assoc-ref %config 'output-stream))))
-  (system command))
+  (system command)
+
+  (when (assoc-ref %config 'stdin-script)
+    (delete-file (assoc-ref %config 'stdin-script))))
