@@ -21,6 +21,14 @@
          (append (flatten (car lst)) (flatten (cdr lst)))]
         [else (list lst)]))
 
+(define (assoc-ref-all lst key)
+  (delete #f (map (lambda (pair)
+                    (let ((comp (if (string? key) string= eq?)))
+                      (if (comp (car pair) key)
+                          (cdr pair)
+                          #f)))
+                  lst)))
+
 ;;
 ;; Program options
 ;; ----------------------------------------------------------------------------
@@ -99,6 +107,19 @@
          ((string= "-o" option)
           (parse-options (cddr options)
                          (cons `(output-stream . ,argument) config)))
+
+         ;; Array jobs
+         ;; -------------------------------------------------------------------
+         ((string= "-t" option)
+          (catch #t
+            (lambda _
+              (let* ((tokens (string-split argument #\-))
+                     (range  (map string->number tokens)))
+                (parse-options (cddr options)
+                               (cons `(array-jobs . ,range) config))))
+            (lambda (key . args)
+              (format #t
+               "For array jobs, only the format '-t n-m' is supported."))))
 
          ;; Administrative options
          ;; -------------------------------------------------------------------
@@ -227,76 +248,102 @@
 ;;
 ;; Command-line options processing
 ;; ----------------------------------------------------------------------------
+(define* (construct-slurm-array-jobs command script preserve-environment
+                                     start end #:optional (output '()))
+  (if (> start end)
+      (reverse output)
+      (construct-slurm-array-jobs
+       command script preserve-environment
+       (+ start 1) end
+       (cons (format #f "~:a--export=~a,SGE_TASK_ID=~a ~s"
+                     command
+                     (if preserve-environment "ALL" "NONE")
+                     start script) output))))
 
-(define (construct-slurm-command options)
+(define (construct-slurm-commands options)
   (call-with-values (lambda _
                       (partition (lambda (item)
                                    (eq? (car item) 'dependency))
                                  options))
     (lambda (dependencies other)
-      (let ((jobs (jobs-and-their-names)))
-        (call-with-output-string
-          (lambda (port)
-            (format port "@SBATCH@ ")
+      (let* ((jobs (jobs-and-their-names))
+             (job-script (if (assoc-ref other 'script)
+                             (assoc-ref other 'script)
+                             (assoc-ref other 'stdin-script)))
+             (command
+              (call-with-output-string
+                (lambda (port)
+                  (format port "@SBATCH@ ")
 
-            (unless (assoc-ref other 'preserve-cwd)
-              (format port "--chdir=$HOME "))
+                  (unless (assoc-ref other 'preserve-cwd)
+                    (format port "--chdir=$HOME "))
 
-            (when (assoc-ref other 'time)
-              (format port "--time ~a " (assoc-ref other 'time)))
+                  (when (assoc-ref other 'time)
+                    (format port "--time ~a " (assoc-ref other 'time)))
 
-            (when (assoc-ref other 'memory)
-              (format port "--mem ~a " (assoc-ref other 'memory)))
+                  (when (assoc-ref other 'memory)
+                    (format port "--mem ~a " (assoc-ref other 'memory)))
 
-            (when (assoc-ref other 'name)
-              (format port "--job-name ~s " (assoc-ref other 'name)))
+                  (when (assoc-ref other 'name)
+                    (format port "--job-name ~s " (assoc-ref other 'name)))
 
-            ;; TOOD: Translate the e-mail options.
-            ;(when (assoc-ref other 'mail-events)
-            ;  (format port " --mail-type=~a" (assoc-ref other 'mail-events)))
+                  ;; TODO: Translate the e-mail options.
+                  ;(when (assoc-ref other 'mail-events)
+                  ;  (format port " --mail-type=~a" (assoc-ref other 'mail-events)))
 
-            ;(when (assoc-ref other 'mail-address)
-            ;  (format port " --mail-user=~a" (assoc-ref other 'mail-address)))
+                  ;(when (assoc-ref other 'mail-address)
+                  ;  (format port " --mail-user=~a" (assoc-ref other 'mail-address)))
 
-            (format port "--export=~a "
-                    (if (assoc-ref other 'preserve-environment)
-                        "ALL" "NONE"))
+                  (unless (assoc-ref other 'array-jobs)
+                    (format port "--export=~a "
+                            (if (assoc-ref other 'preserve-environment)
+                                "ALL" "NONE")))
 
-            ;; Output streams / log files
-            (when (assoc-ref other 'output-stream)
-              (format port "--output ~s " (assoc-ref other 'output-stream)))
+                  ;; Output streams / log files
+                  (when (assoc-ref other 'output-stream)
+                    (format port "--output ~s " (assoc-ref other 'output-stream)))
 
-            (when (assoc-ref other 'error-stream)
-              (format port "--error ~s " (assoc-ref other 'error-stream)))
+                  (when (assoc-ref other 'error-stream)
+                    (format port "--error ~s " (assoc-ref other 'error-stream)))
 
-            ;; We divide the number of threads by two, because
-            ;; every CPU in the cluster can have two threads.
-            (when (assoc-ref other 'threads)
-              (format port "--cpus-per-task ~a "
-                      (ceiling
-                       (/ (string->number (assoc-ref other 'threads))
-                          2))))
+                  ;; We divide the number of threads by two, because
+                  ;; every CPU in the cluster can have two threads.
+                  (when (assoc-ref other 'threads)
+                    (format port "--cpus-per-task ~a "
+                            (ceiling
+                             (/ (string->number (assoc-ref other 'threads))
+                                2))))
 
-            (unless (or (null? dependencies)
-                        (null? jobs))
-              (format port "--dependency=afterok~{:~a~} "
-                      (map (lambda (dependency) (assoc-ref jobs dependency))
-                           (map cdr dependencies))))
+                  (unless (or (null? dependencies)
+                              (null? jobs))
+                    (format port "--dependency=afterok~{:~a~} "
+                            (flatten
+                             (map (lambda (dependency) (assoc-ref-all jobs dependency))
+                                  (map cdr dependencies)))))
 
-            (if (assoc-ref other 'script)
-                (format port "~a" (assoc-ref other 'script))
-                (format port "~a" (assoc-ref other 'stdin-script)))))))))
+                  (unless (assoc-ref other 'array-jobs)
+                    (format port "~s" job-script))))))
+        (if (assoc-ref other 'array-jobs)
+            (let* ((range (assoc-ref other 'array-jobs))
+                   (start (car range))
+                   (end   (cadr range)))
+              (construct-slurm-array-jobs command
+                                          job-script
+                                          (assoc-ref other 'preserve-environment)
+                                          start end))
+            (list command))))))
 
 ;;
 ;; Slurmification
 ;; ----------------------------------------------------------------------------
 
-(let ((command (construct-slurm-command %config)))
-  (format #t "Running:  ~s~%" command)
+(let ((commands (construct-slurm-commands %config)))
   (for-each (lambda (entry) (setenv (car entry) (cdr entry)))
             `(("SGE_STDERR_PATH" . ,(assoc-ref %config 'error-stream))
               ("SGE_STDOUT_PATH" . ,(assoc-ref %config 'output-stream))))
-  (system command)
-
+  (for-each (lambda (command)
+              (format #t "Executing: ~s~%" command)
+              (system command))
+            commands)
   (when (assoc-ref %config 'stdin-script)
     (delete-file (assoc-ref %config 'stdin-script))))
