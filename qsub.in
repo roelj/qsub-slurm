@@ -351,7 +351,7 @@
             `(("SGE_STDERR_PATH" . ,(assoc-ref %config 'error-stream))
               ("SGE_STDOUT_PATH" . ,(assoc-ref %config 'output-stream))))
   (for-each (lambda (command)
-              (format #t "Executing: ~s~%" command)
+              (format #t "Executing: ~a~%" command)
               (system command))
             commands)
   (when (assoc-ref %config 'stdin-script)
