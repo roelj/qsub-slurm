@@ -113,13 +113,21 @@
          ((string= "-t" option)
           (catch #t
             (lambda _
-              (let* ((tokens (string-split argument #\-))
-                     (range  (map string->number tokens)))
+              (let* ((dash   (string-index argument #\-))
+                     (colon  (string-index argument #\:))
+                     (start  (substring argument 0 dash))
+                     (end    (if colon
+                                 (substring argument (+ dash 1) colon)
+                                 (substring argument (+ dash 1))))
+                     (step   (if colon
+                                 (substring argument (+ colon 1))
+                                 "1"))
+                     (range  (map string->number (list start end step))))
                 (parse-options (cddr options)
                                (cons `(array-jobs . ,range) config))))
             (lambda (key . args)
               (format #t
-               "For array jobs, only the format '-t n-m' is supported."))))
+               "For array jobs, the format should be 'n-m' or 'n-m:o'."))))
 
          ;; Administrative options
          ;; -------------------------------------------------------------------
@@ -249,12 +257,12 @@
 ;; Command-line options processing
 ;; ----------------------------------------------------------------------------
 (define* (construct-slurm-array-jobs command script preserve-environment
-                                     start end #:optional (output '()))
+                                     start end step #:optional (output '()))
   (if (> start end)
       (reverse output)
       (construct-slurm-array-jobs
        command script preserve-environment
-       (+ start 1) end
+       (+ start step) end step
        (cons (format #f "~:a--export=~a,SGE_TASK_ID=~a ~s"
                      command
                      (if preserve-environment "ALL" "NONE")
@@ -325,12 +333,13 @@
                     (format port "~s" job-script))))))
         (if (assoc-ref other 'array-jobs)
             (let* ((range (assoc-ref other 'array-jobs))
-                   (start (car range))
-                   (end   (cadr range)))
+                   (start (list-ref range 0))
+                   (end   (list-ref range 1))
+                   (step  (list-ref range 2)))
               (construct-slurm-array-jobs command
                                           job-script
                                           (assoc-ref other 'preserve-environment)
-                                          start end))
+                                          start end step))
             (list command))))))
 
 ;;
