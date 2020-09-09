@@ -263,10 +263,10 @@
       (construct-slurm-array-jobs
        command script preserve-environment
        (+ start step) end step
-       (cons (format #f "~:a--export=~a,SGE_TASK_ID=~a ~s"
+       (cons (format #f "~:a--export=~a,SGE_TASK_ID=~a,TASK_ID=~a ~s"
                      command
                      (if preserve-environment "ALL" "NONE")
-                     start script) output))))
+                     start start script) output))))
 
 (define (construct-slurm-commands options)
   (call-with-values (lambda _
